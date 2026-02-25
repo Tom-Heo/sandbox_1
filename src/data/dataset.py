@@ -56,19 +56,20 @@ class OxfordPetDataset(Dataset):
 
     def __getitem__(self, idx):
         img_pil, mask_pil = self.dataset[idx]
-
-        # 1. v2 인식용 타입 매핑 (이 선언 하나로 보간법 함정이 완벽히 방어됨)
         img = tv_tensors.Image(img_pil)
         mask = tv_tensors.Mask(mask_pil)
 
-        # 2. Joint Transform 적용 (이미지와 마스크가 동일한 각도/비율로 동기화되어 변형됨)
         img, mask = self.transforms(img, mask)
 
         # 3. Trimap 클래스 매핑: {1, 2, 3} -> {0, 1, 2}
-        # - 0: Pet (전경)
-        # - 1: Background (배경)
-        # - 2: Boundary (경계선)
         mask = mask - 1
+
+        # ★ FIX: RandomAffine 증강 시 생긴 빈 공간(Padding=0)이 -1이 되어버림.
+        # 이 빈 공간을 '배경(Class 1)'으로 강제 변환하여 에러를 막습니다.
+        mask[mask == -1] = 1
+        
+        # 만약 Resize 과정 등에서 255(Ignore Index)가 발생했을 경우도 안전하게 배경으로 처리
+        mask[mask == 254] = 1 
 
         # 4. Loss 계산을 위해 마스크의 채널 차원 (1, H, W) -> (H, W) 축소
         mask = mask.squeeze(0)
