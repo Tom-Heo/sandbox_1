@@ -1,0 +1,59 @@
+# ==========================================
+# 1. Project Specific (데이터 및 결과물)
+# ==========================================
+# 다운로드 받은 Oxford Pet 데이터셋 무시 (용량 큼)
+data/*
+!data/.gitkeep
+
+# 학습된 모델 가중치 무시 (GitHub 용량 초과 방지)
+outputs/weights/*.pth
+outputs/weights/*.pt
+outputs/weights/*.ckpt
+
+# 텐서보드 등 로그 파일 무시
+outputs/logs/*
+!outputs/logs/.gitkeep
+
+# 생성된 시각화 이미지 무시 (선택 사항: 주석 처리 시 깃허브에 업로드됨)
+outputs/figures/*.png
+outputs/figures/*.pdf
+outputs/figures/*.jpg
+
+# ==========================================
+# 2. Python Environments & Cache
+# ==========================================
+# 파이썬 캐시 파일
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 가상환경 폴더
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Jupyter Notebook 체크포인트
+.ipynb_checkpoints/
+
+# ==========================================
+# 3. OS & IDE
+# ==========================================
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# VS Code / PyCharm
+.vscode/
+.idea/
+*.swp
+*.swo
