@@ -112,8 +112,8 @@ class ResearchVisualizer:
 
         ax.set_yscale('log')
         ax.set_xlabel("Epochs", fontsize=12, fontweight='bold')
-        ax.set_ylabel("Boundary Focal Loss (Log Scale)", fontsize=12, fontweight='bold')
-        ax.set_title("Convergence of Boundary Loss across Color Spaces and Activations", fontsize=14)
+        ax.set_ylabel("Validation Boundary IoU", fontsize=12, fontweight='bold')
+        ax.set_title("Convergence of Boundary IoU across Color Spaces and Activations", fontsize=14)
         
         ax.grid(True, which="both", ls="--", alpha=0.5)
         ax.legend(loc='upper right', frameon=True, shadow=True)

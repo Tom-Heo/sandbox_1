@@ -143,8 +143,8 @@ def main():
         )
         # 시각화 툴 포맷에 맞게 변환
         all_histories[exp['name']] = {
-    'boundary_iou': history['val_boundary_iou'] # Loss 대신 명확한 Target Metric으로 교체
-}
+    'boundary_iou': history['val_boundary_iou']
+    }
         
     # 3. 최종 논문용 4색 그래프 렌더링
     print("\n🎨 Rendering Final Convergence Graph for Paper...")
