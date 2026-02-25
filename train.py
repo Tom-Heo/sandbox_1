@@ -157,3 +157,7 @@ def main():
         filename="Final_Boundary_IoU_Convergence.pdf"
     )
     print("✅ All Experiments Completed Successfully!")
+
+
+if __name__ == '__main__':
+    main()
