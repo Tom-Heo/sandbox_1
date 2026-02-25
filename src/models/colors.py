@@ -1,169 +1,92 @@
-import os
 import torch
-import random
-import numpy as np
-from tqdm import tqdm
-
-# 내부 모듈 임포트
-from src.data.dataset import get_dataloaders
-from src.models.unet import PetSegmentationModel
-from src.core.loss import BoundaryTargetedLoss
-from src.core.metrics import TrimapIoUMetric
-from src.core.scheduler import build_optimizer, build_scheduler
-from src.utils.visualizer import ResearchVisualizer
+import torch.nn as nn
 
 
-def set_seed(seed=42):
-    """[완벽한 재현성 통제]
-    운(Luck)이 개입할 여지를 원천 차단합니다.
-    """
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+class Palette:
+    class sRGBtoOklabP(nn.Module):
+        """
+        [Color Space Converter]
+        Standard sRGB (0~1) -> OklabP (Lp, ap, bp)
+        * OklabP (Processing Scale): [-1, 1] Normalized
+        """
 
+        def __init__(self):
+            super().__init__()
+            self.epsilon = 1e-8
 
-def train_single_model(exp_name, use_oklab, use_helu, dataloaders, config):
-    """단일 모델의 학습부터 평가, 시각화, 가중치 저장까지 책임지는 파이프라인"""
-    print(f"\n{'='*50}\n🚀 Starting Experiment: {exp_name}\n{'='*50}")
+        @staticmethod
+        def srgb_to_lsrgb(srgb: torch.Tensor) -> torch.Tensor:
+            return torch.where(
+                srgb <= 0.04045,
+                srgb / 12.92,
+                ((srgb + 0.055) / 1.055) ** 2.4,
+            )
 
-    device = config["device"]
-    epochs = config["epochs"]
-    train_loader, val_loader = dataloaders
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            if x.dim() != 4 or x.size(1) != 3:
+                raise ValueError(f"Expected (B,3,H,W), got {tuple(x.shape)}")
 
-    # 1. 아키텍처, 손실함수, 평가망, 옵티마이저, 스케줄러 세팅
-    model = PetSegmentationModel(use_oklab=use_oklab, use_helu=use_helu).to(device)
-    criterion = BoundaryTargetedLoss(boundary_boost=2.0).to(device)
-    metric = TrimapIoUMetric(num_classes=3, device=device)
-    visualizer = ResearchVisualizer(save_dir=f"outputs/figures/{exp_name}")
+            x_perm = x.permute(0, 2, 3, 1)
+            srgb = x_perm.clamp(0.0, 1.0)
+            lsrgb = self.srgb_to_lsrgb(srgb)
 
-    optimizer = build_optimizer(model, base_lr=1e-4)
-    scheduler = build_scheduler(optimizer, warmup_epochs=5)
+            r, g, b = lsrgb[..., 0], lsrgb[..., 1], lsrgb[..., 2]
 
-    best_boundary_iou = 0.0
-    history = {"train_loss": [], "val_boundary_iou": [], "val_miou": []}
+            l = 0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b
+            m = 0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b
+            s = 0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b
 
-    for epoch in range(1, epochs + 1):
-        # ------------------- [TRAIN PHASE] -------------------
-        model.train()
-        train_loss = 0.0
+            l_ = torch.sign(l) * (torch.abs(l) + self.epsilon).pow(1.0 / 3.0)
+            m_ = torch.sign(m) * (torch.abs(m) + self.epsilon).pow(1.0 / 3.0)
+            s_ = torch.sign(s) * (torch.abs(s) + self.epsilon).pow(1.0 / 3.0)
 
-        pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{epochs} [Train]", leave=False)
-        for imgs, masks in pbar:
-            imgs, masks = imgs.to(device), masks.to(device)
+            L = 0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_
+            a = 1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_
+            b_ = 0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_
 
-            optimizer.zero_grad()
-            outputs = model(imgs)
-            loss = criterion(outputs, masks)
+            Lp = (2.0 * L) - 1.0
+            ap = 2.0 * a
+            bp = 2.0 * b_
 
-            loss.backward()
-            optimizer.step()
+            out = torch.stack([Lp, ap, bp], dim=1)
+            return out
 
-            train_loss += loss.item()
-            pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+    class OklabPtosRGB(nn.Module):
+        """OklabP -> Standard sRGB"""
 
-        avg_train_loss = train_loss / len(train_loader)
-        scheduler.step()  # 에폭 종료 후 스케줄러 업데이트
+        def __init__(self):
+            super().__init__()
 
-        # -------------------- [VAL PHASE] --------------------
-        model.eval()
-        metric.reset()
+        @staticmethod
+        def lsrgb_to_srgb(lsrgb: torch.Tensor) -> torch.Tensor:
+            threshold = 0.0031308
+            return torch.where(
+                lsrgb <= threshold,
+                12.92 * lsrgb,
+                1.055 * torch.clamp(lsrgb, min=0.0) ** (1.0 / 2.4) - 0.055,
+            )
 
-        with torch.no_grad():
-            for i, (imgs, masks) in enumerate(val_loader):
-                imgs, masks = imgs.to(device), masks.to(device)
-                outputs = model(imgs)
-                metric.update(outputs, masks)
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            if x.dim() != 4 or x.size(1) != 3:
+                raise ValueError(f"Expected (B,3,H,W), got {tuple(x.shape)}")
 
-                # 에폭별 첫 번째 배치에서 시각화용 이미지 추출 (추이 관찰용)
-                if i == 0:
-                    preds = torch.argmax(outputs, dim=1)
-                    visualizer.save_prediction_grid(
-                        epoch,
-                        imgs.cpu(),
-                        masks.cpu(),
-                        preds.cpu(),
-                        filename=f"epoch_{epoch:03d}.png",
-                    )
+            Lp, ap, bp = x[:, 0], x[:, 1], x[:, 2]
+            L = (Lp + 1.0) * 0.5
+            a = ap * 0.5
+            b = bp * 0.5
 
-        metrics = metric.compute()
-        b_iou = metrics["iou_boundary"]
+            l_ = L + 0.3963377774 * a + 0.2158037573 * b
+            m_ = L - 0.1055613458 * a - 0.0638541728 * b
+            s_ = L - 0.0894841775 * a - 1.2914855480 * b
 
-        history["train_loss"].append(avg_train_loss)
-        history["val_boundary_iou"].append(b_iou)
-        history["val_miou"].append(metrics["miou"])
+            l = l_**3
+            m = m_**3
+            s = s_**3
 
-        print(
-            f"Epoch[{epoch}/{epochs}] "
-            f"Loss: {avg_train_loss:.4f} | "
-            f"LR: {scheduler.get_last_lr()[0]:.2e} | "
-            f"mIoU: {metrics['miou']:.4f} | "
-            f"Boundary IoU: {b_iou:.4f}"
-        )
+            r = 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s
+            g = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s
+            b_rgb = 0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s
 
-        # ----------------- [EARLY STOPPING & SAVE] -----------------
-        # 조기 종료 및 가중치 저장의 기준은 오직 '경계선(Boundary) IoU'입니다.
-        if b_iou > best_boundary_iou:
-            best_boundary_iou = b_iou
-            os.makedirs("outputs/weights", exist_ok=True)
-            save_path = f"outputs/weights/{exp_name}_best.pth"
-            torch.save(model.state_dict(), save_path)
-            print(f"🌟 Best Model Saved! (Boundary IoU: {best_boundary_iou:.4f})")
-
-    return history
-
-
-def main():
-    # 0. 전역 통제 설정
-    set_seed(42)
-    config = {
-        "device": "cuda" if torch.cuda.is_available() else "cpu",
-        "epochs": 50,  # 연구 목적이므로 충분히 길게 돌립니다.
-        "batch_size": 16,  # 기울기 노이즈 보존을 위해 16으로 통제
-    }
-
-    print(f"Hardware Check: Using {config['device'].upper()}")
-
-    # 데이터로더는 단 한 번만 생성하여 4개 모델이 완전히 동일한 난수 배치를 먹게 합니다.
-    dataloaders = get_dataloaders(batch_size=config["batch_size"])
-
-    # 1. 2x2 요인 설계 (Factorial Design) 실험 목록
-    experiments = [
-        {"name": "sRGB_ReLU", "use_oklab": False, "use_helu": False},
-        {"name": "sRGB_HeLU", "use_oklab": False, "use_helu": True},
-        {"name": "OklabP_ReLU", "use_oklab": True, "use_helu": False},
-        {"name": "OklabP_HeLU", "use_oklab": True, "use_helu": True},
-    ]
-
-    all_histories = {}
-
-    # 2. 오케스트레이션 (순차 학습)
-    for exp in experiments:
-        history = train_single_model(
-            exp_name=exp["name"],
-            use_oklab=exp["use_oklab"],
-            use_helu=exp["use_helu"],
-            dataloaders=dataloaders,
-            config=config,
-        )
-        # 시각화 툴 포맷에 맞게 변환
-        all_histories[exp["name"]] = {
-            "boundary_loss": history[
-                "train_loss"
-            ]  # 단순화를 위해 train_loss를 대표로 사용
-        }
-
-    # 3. 최종 논문용 4색 그래프 렌더링
-    print("\n🎨 Rendering Final Convergence Graph for Paper...")
-    final_visualizer = ResearchVisualizer(save_dir="outputs/figures")
-    final_visualizer.plot_4model_loss_curves(
-        all_histories, warmup_epochs=5, filename="Final_Loss_Convergence.pdf"
-    )
-    print("✅ All Experiments Completed Successfully!")
-
-
-if __name__ == "__main__":
-    main()
+            rgb_lin = torch.stack([r, g, b_rgb], dim=1)
+            srgb = self.lsrgb_to_srgb(rgb_lin)
+            return srgb.clamp(0.0, 1.0)
