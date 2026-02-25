@@ -67,7 +67,7 @@ def build_optimizer(
     optimizer = torch.optim.AdamW(
         [
             {"params": base_params, "lr": base_lr, "weight_decay": weight_decay},
-            {"params": helu_params, "lr": base_lr * 32.0, "weight_decay": 0.0},
+            {"params": helu_params, "lr": base_lr * 64.0, "weight_decay": 0.0},
         ]
     )
 
