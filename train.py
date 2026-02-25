@@ -12,10 +12,9 @@ from src.core.metrics import TrimapIoUMetric
 from src.core.scheduler import build_optimizer, build_scheduler
 from src.utils.visualizer import ResearchVisualizer
 
+
 def set_seed(seed=42):
-    """[완벽한 재현성 통제]
-    운(Luck)이 개입할 여지를 원천 차단합니다.
-    """
+    """[완벽한 재현성 통제]"""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -24,140 +23,155 @@ def set_seed(seed=42):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def train_single_model(exp_name, use_oklab, use_helu, dataloaders, config):
-    """단일 모델의 학습부터 평가, 시각화, 가중치 저장까지 책임지는 파이프라인"""
-    print(f"\n{'='*50}\n🚀 Starting Experiment: {exp_name}\n{'='*50}")
-    
-    device = config['device']
-    epochs = config['epochs']
-    train_loader, val_loader = dataloaders
-    
-    # 1. 아키텍처, 손실함수, 평가망, 옵티마이저, 스케줄러 세팅
-    model = PetSegmentationModel(use_oklab=use_oklab, use_helu=use_helu).to(device)
-    criterion = BoundaryTargetedLoss(boundary_boost=2.0).to(device)
-    metric = TrimapIoUMetric(num_classes=3, device=device)
-    visualizer = ResearchVisualizer(save_dir=f'outputs/figures/{exp_name}')
-    
-    optimizer = build_optimizer(model, base_lr=1e-4)
-    scheduler = build_scheduler(optimizer, warmup_epochs=5)
-    
-    best_boundary_iou = 0.0
-    history = {'train_loss':[], 'val_boundary_iou': [], 'val_miou':[]}
-    
-    for epoch in range(1, epochs + 1):
-        # ------------------- [TRAIN PHASE] -------------------
-        model.train()
-        train_loss = 0.0
-        
-        pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{epochs} [Train]", leave=False)
-        for imgs, masks in pbar:
-            imgs, masks = imgs.to(device), masks.to(device)
-            
-            optimizer.zero_grad()
-            outputs = model(imgs)
-            loss = criterion(outputs, masks)
-            
-            loss.backward()
-            optimizer.step()
-            
-            train_loss += loss.item()
-            pbar.set_postfix({'loss': f"{loss.item():.4f}"})
-            
-        avg_train_loss = train_loss / len(train_loader)
-        scheduler.step()  # 에폭 종료 후 스케줄러 업데이트
-        
-        # -------------------- [VAL PHASE] --------------------
-        model.eval()
-        metric.reset()
-        
-        with torch.no_grad():
-            for i, (imgs, masks) in enumerate(val_loader):
-                imgs, masks = imgs.to(device), masks.to(device)
-                outputs = model(imgs)
-                metric.update(outputs, masks)
-                
-                # 에폭별 첫 번째 배치에서 시각화용 이미지 추출 (추이 관찰용)
-                if i == 0:
-                    preds = torch.argmax(outputs, dim=1)
-                    visualizer.save_prediction_grid(
-                        epoch, imgs.cpu(), masks.cpu(), preds.cpu(), 
-                        filename=f"epoch_{epoch:03d}.png"
-                    )
-                    
-        metrics = metric.compute()
-        b_iou = metrics['iou_boundary']
-        
-        history['train_loss'].append(avg_train_loss)
-        history['val_boundary_iou'].append(b_iou)
-        history['val_miou'].append(metrics['miou'])
-        
-        print(f"Epoch[{epoch}/{epochs}] "
-              f"Loss: {avg_train_loss:.4f} | "
-              f"LR: {scheduler.get_last_lr()[0]:.2e} | "
-              f"mIoU: {metrics['miou']:.4f} | "
-              f"Boundary IoU: {b_iou:.4f}")
-        
-        # ----------------- [EARLY STOPPING & SAVE] -----------------
-        # 조기 종료 및 가중치 저장의 기준은 오직 '경계선(Boundary) IoU'입니다.
-        if b_iou > best_boundary_iou:
-            best_boundary_iou = b_iou
-            os.makedirs('outputs/weights', exist_ok=True)
-            save_path = f"outputs/weights/{exp_name}_best.pth"
-            torch.save(model.state_dict(), save_path)
-            print(f"🌟 Best Model Saved! (Boundary IoU: {best_boundary_iou:.4f})")
-            
-    return history
 
 def main():
     # 0. 전역 통제 설정
     set_seed(42)
     config = {
-        'device': 'cuda' if torch.cuda.is_available() else 'cpu',
-        'epochs': 50,     # 연구 목적이므로 충분히 길게 돌립니다.
-        'batch_size': 16  # 기울기 노이즈 보존을 위해 16으로 통제
+        "device": "cuda" if torch.cuda.is_available() else "cpu",
+        "epochs": 50,
+        "batch_size": 16,  # 4개 모델 동시 학습이므로 실제 VRAM은 약 30~40GB 점유 예상
     }
-    
-    print(f"Hardware Check: Using {config['device'].upper()}")
-    
-    # 데이터로더는 단 한 번만 생성하여 4개 모델이 완전히 동일한 난수 배치를 먹게 합니다.
-    dataloaders = get_dataloaders(batch_size=config['batch_size'])
-    
-    # 1. 2x2 요인 설계 (Factorial Design) 실험 목록
-    experiments =[
-        {'name': 'sRGB_ReLU',   'use_oklab': False, 'use_helu': False},
-        {'name': 'sRGB_HeLU',   'use_oklab': False, 'use_helu': True},
-        {'name': 'OklabP_ReLU', 'use_oklab': True,  'use_helu': False},
-        {'name': 'OklabP_HeLU', 'use_oklab': True,  'use_helu': True},
-    ]
-    
-    all_histories = {}
-    
-    # 2. 오케스트레이션 (순차 학습)
-    for exp in experiments:
-        history = train_single_model(
-            exp_name=exp['name'],
-            use_oklab=exp['use_oklab'],
-            use_helu=exp['use_helu'],
-            dataloaders=dataloaders,
-            config=config
-        )
-        # ★ 수정된 부분: Train Loss 대신 Validation Boundary IoU를 넘겨줍니다.
-        all_histories[exp['name']] = {
-            'boundary_iou': history['val_boundary_iou']
-        }
-        
-    # 3. 최종 논문용 4색 그래프 렌더링
-    print("\n🎨 Rendering Final Convergence Graph for Paper...")
-    final_visualizer = ResearchVisualizer(save_dir='outputs/figures')
-    
-    # ★ 수정된 부분: 바뀐 시각화 함수(plot_4model_iou_curves)를 호출합니다.
-    final_visualizer.plot_4model_iou_curves(
-        all_histories, 
-        warmup_epochs=5, 
-        filename="Final_Boundary_IoU_Convergence.pdf"
+
+    print(
+        f"🚀 Hardware Check: Using {config['device'].upper()} with Concurrent Training"
     )
-    print("✅ All Experiments Completed Successfully!")
+
+    # 데이터로더 생성 (단 1개의 배치 스트림)
+    train_loader, val_loader = get_dataloaders(batch_size=config["batch_size"])
+
+    # 1. 2x2 요인 설계 실험 목록
+    experiments = [
+        {"name": "sRGB_ReLU", "use_oklab": False, "use_helu": False},
+        {"name": "sRGB_HeLU", "use_oklab": False, "use_helu": True},
+        {"name": "OklabP_ReLU", "use_oklab": True, "use_helu": False},
+        {"name": "OklabP_HeLU", "use_oklab": True, "use_helu": True},
+    ]
+
+    # 2. 4개 모델의 독립적인 객체들을 담을 딕셔너리 준비
+    models = {}
+    optimizers = {}
+    schedulers = {}
+    metrics = {}
+    visualizers = {}
+    histories = {}
+    best_ious = {}
+
+    criterion = BoundaryTargetedLoss(boundary_boost=2.0).to(config["device"])
+
+    print("\n📦 Initializing 4 Models into VRAM...")
+    for exp in experiments:
+        name = exp["name"]
+        model = PetSegmentationModel(
+            use_oklab=exp["use_oklab"], use_helu=exp["use_helu"]
+        ).to(config["device"])
+
+        models[name] = model
+        optimizers[name] = build_optimizer(model, base_lr=1e-4)
+        schedulers[name] = build_scheduler(optimizers[name], warmup_epochs=5)
+        metrics[name] = TrimapIoUMetric(num_classes=3, device=config["device"])
+        visualizers[name] = ResearchVisualizer(save_dir=f"outputs/figures/{name}")
+
+        histories[name] = {"train_loss": [], "val_boundary_iou": [], "val_miou": []}
+        best_ious[name] = 0.0
+
+    os.makedirs("outputs/weights", exist_ok=True)
+
+    # 3. 오케스트레이션 (동시 학습 루프)
+    for epoch in range(1, config["epochs"] + 1):
+        print(f"\n{'='*60}\n🏁 Epoch[{epoch}/{config['epochs']}]\n{'='*60}")
+
+        # -------------------[TRAIN PHASE] -------------------
+        for name in models:
+            models[name].train()
+
+        train_losses = {name: 0.0 for name in models}
+
+        pbar = tqdm(train_loader, desc="[Train]", leave=False)
+        for imgs, masks in pbar:
+            imgs, masks = imgs.to(config["device"]), masks.to(config["device"])
+
+            # 단일 배치를 4개 모델이 동시에 먹고 각각 역전파 수행
+            for name, model in models.items():
+                optimizers[name].zero_grad()
+                outputs = model(imgs)
+                loss = criterion(outputs, masks)
+                loss.backward()
+                optimizers[name].step()
+
+                train_losses[name] += loss.item()
+
+        # Train 에폭 종료 처리
+        for name in models:
+            avg_train_loss = train_losses[name] / len(train_loader)
+            histories[name]["train_loss"].append(avg_train_loss)
+            schedulers[name].step()
+
+        # -------------------- [VAL PHASE] --------------------
+        for name in models:
+            models[name].eval()
+            metrics[name].reset()
+
+        with torch.no_grad():
+            for i, (imgs, masks) in enumerate(
+                tqdm(val_loader, desc="[Valid]", leave=False)
+            ):
+                imgs, masks = imgs.to(config["device"]), masks.to(config["device"])
+
+                for name, model in models.items():
+                    outputs = model(imgs)
+                    metrics[name].update(outputs, masks)
+
+                    # 에폭별 첫 번째 배치에서 4개 모델 모두 시각화용 이미지 추출
+                    if i == 0:
+                        preds = torch.argmax(outputs, dim=1)
+                        visualizers[name].save_prediction_grid(
+                            epoch,
+                            imgs.cpu(),
+                            masks.cpu(),
+                            preds.cpu(),
+                            filename=f"epoch_{epoch:03d}.png",
+                        )
+
+        # -----------------[LOGGING & SAVE] -----------------
+        print(f"\n📊 Epoch [{epoch}] Summary:")
+        for name in models:
+            res = metrics[name].compute()
+            b_iou = res["iou_boundary"]
+            m_iou = res["miou"]
+            current_lr = schedulers[name].get_last_lr()[0]
+
+            histories[name]["val_boundary_iou"].append(b_iou)
+            histories[name]["val_miou"].append(m_iou)
+
+            # 결과 출력 (터미널에서 4개 모델을 한눈에 비교)
+            print(
+                f"  [{name:<12}] Loss: {histories[name]['train_loss'][-1]:.4f} | "
+                f"LR: {current_lr:.2e} | mIoU: {m_iou:.4f} | Boundary IoU: {b_iou:.4f}"
+            )
+
+            # 최고 성능 갱신 시 가중치 저장 (오직 경계선 IoU 기준)
+            if b_iou > best_ious[name]:
+                best_ious[name] = b_iou
+                save_path = f"outputs/weights/{name}_best.pth"
+                torch.save(models[name].state_dict(), save_path)
+                print(f"      ⭐ {name} updated best weights! (B-IoU: {b_iou:.4f})")
+
+    # 4. 최종 논문용 4색 그래프 렌더링
+    print("\n🎨 Rendering Final Convergence Graph for Paper...")
+    final_visualizer = ResearchVisualizer(save_dir="outputs/figures")
+
+    # 시각화 함수 요구 포맷으로 히스토리 변환
+    plot_data = {
+        name: {"boundary_iou": hist["val_boundary_iou"]}
+        for name, hist in histories.items()
+    }
+
+    final_visualizer.plot_4model_iou_curves(
+        plot_data, warmup_epochs=5, filename="Final_Boundary_IoU_Convergence.pdf"
+    )
+    print("✅ All 4 Experiments Completed Concurrently!")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

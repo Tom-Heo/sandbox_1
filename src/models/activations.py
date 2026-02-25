@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from math import sqrt
 
+
 class Heo:
     class HeLU2d(nn.Module):
         def __init__(self, channels: int):
@@ -11,8 +12,8 @@ class Heo:
 
             self.alpha = nn.Parameter(torch.full((c,), 1.0))
             self.beta = nn.Parameter(torch.full((c,), -1.0))
-            self.redweight = nn.Parameter(torch.empty(c).normal_(mean=0.0, std=0.75))
-            self.blueweight = nn.Parameter(torch.empty(c).normal_(mean=0.0, std=0.75))
+            self.redweight = nn.Parameter(torch.empty(c).normal_(mean=0.0, std=0.45))
+            self.blueweight = nn.Parameter(torch.empty(c).normal_(mean=0.0, std=0.45))
 
             self.redgelu = nn.GELU()
             self.bluegelu = nn.GELU()
@@ -29,5 +30,5 @@ class Heo:
             alpha = (torch.tanh(sqrt(3.0) * self.alpha) + 1.0).view(1, -1, 1, 1)
             beta = (torch.tanh(sqrt(3.0) * self.beta) + 1.0).view(1, -1, 1, 1)
             y = (alpha * x + beta * raw) / 2
-            
+
             return y
