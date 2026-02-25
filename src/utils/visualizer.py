@@ -80,19 +80,14 @@ class ResearchVisualizer:
         plt.savefig(os.path.join(self.save_dir, filename), bbox_inches='tight')
         plt.close()
 
-    def plot_4model_loss_curves(self, histories: dict, warmup_epochs=5, filename="loss_curves.pdf"):
-        """
-        [논문 본문용 4개 모델 통합 Loss 비교 그래프]
-        Y축을 Log-Scale로 변환하고, Warm-up 구간을 시각적으로 하이라이트합니다.
-        
-        histories = {
-            'sRGB_ReLU': {'boundary_loss': [...], ...},
-            'OklabP_HeLU': {'boundary_loss': [...], ...}, ...
-        }
+    def plot_4model_iou_curves(self, histories: dict, warmup_epochs=5, filename="iou_curves.pdf"):
+        """[논문 본문용 4개 모델 통합 Boundary IoU 비교 그래프]
+        Loss 대신, 이 연구의 핵심 타겟인 '검증 데이터의 경계선 IoU'가 
+        에폭에 따라 어떻게 상승하는지 보여줍니다. (높을수록 좋음)
         """
         fig, ax = plt.subplots(figsize=(10, 6), dpi=300)
 
-        # 선 스타일 매핑 (통제 변인에 따른 일관된 디자인)
+        # 선 스타일 매핑
         styles = {
             'sRGB_ReLU':   {'color': 'gray',  'ls': '--', 'lw': 1.5, 'label': 'Baseline (sRGB + ReLU)'},
             'sRGB_HeLU':   {'color': 'blue',  'ls': '-',  'lw': 2.0, 'label': 'sRGB + HeLU2d'},
@@ -103,20 +98,22 @@ class ResearchVisualizer:
         # Warm-up 구간 음영 처리
         ax.axvspan(0, warmup_epochs, color='khaki', alpha=0.3, label='Warm-up Phase')
 
-        # 데이터 플로팅 (가장 중요한 Boundary Loss 기준)
+        # 데이터 플로팅 (가장 중요한 Boundary IoU 기준)
         for model_name, hist in histories.items():
             if model_name in styles:
                 s = styles[model_name]
-                ax.plot(hist['boundary_loss'], color=s['color'], linestyle=s['ls'], 
+                ax.plot(hist['boundary_iou'], color=s['color'], linestyle=s['ls'], 
                         linewidth=s['lw'], label=s['label'])
 
-        ax.set_yscale('log')
+        # Y축 설정: IoU는 0 ~ 1.0 사이의 값이므로 선형(Linear) 스케일을 씁니다.
+        ax.set_ylim(0.0, 1.0)
         ax.set_xlabel("Epochs", fontsize=12, fontweight='bold')
         ax.set_ylabel("Validation Boundary IoU", fontsize=12, fontweight='bold')
         ax.set_title("Convergence of Boundary IoU across Color Spaces and Activations", fontsize=14)
         
         ax.grid(True, which="both", ls="--", alpha=0.5)
-        ax.legend(loc='upper right', frameon=True, shadow=True)
+        # IoU는 위로 상승하는 그래프이므로, 선을 가리지 않게 범례를 우측 하단으로 내립니다.
+        ax.legend(loc='lower right', frameon=True, shadow=True)
 
         plt.savefig(os.path.join(self.save_dir, filename), bbox_inches='tight', format='pdf')
         plt.close()

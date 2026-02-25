@@ -141,20 +141,19 @@ def main():
             dataloaders=dataloaders,
             config=config
         )
-        # 시각화 툴 포맷에 맞게 변환
+        # ★ 수정된 부분: Train Loss 대신 Validation Boundary IoU를 넘겨줍니다.
         all_histories[exp['name']] = {
-    'boundary_iou': history['val_boundary_iou']
-    }
+            'boundary_iou': history['val_boundary_iou']
+        }
         
     # 3. 최종 논문용 4색 그래프 렌더링
     print("\n🎨 Rendering Final Convergence Graph for Paper...")
     final_visualizer = ResearchVisualizer(save_dir='outputs/figures')
-    final_visualizer.plot_4model_loss_curves(
+    
+    # ★ 수정된 부분: 바뀐 시각화 함수(plot_4model_iou_curves)를 호출합니다.
+    final_visualizer.plot_4model_iou_curves(
         all_histories, 
         warmup_epochs=5, 
-        filename="Final_Loss_Convergence.pdf"
+        filename="Final_Boundary_IoU_Convergence.pdf"
     )
     print("✅ All Experiments Completed Successfully!")
-
-if __name__ == '__main__':
-    main()
