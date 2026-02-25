@@ -29,7 +29,7 @@ def main():
     set_seed(42)
     config = {
         "device": "cuda" if torch.cuda.is_available() else "cpu",
-        "epochs": 50,
+        "epochs": 500,
         "batch_size": 16,  # 4개 모델 동시 학습이므로 실제 VRAM은 약 30~40GB 점유 예상
     }
 

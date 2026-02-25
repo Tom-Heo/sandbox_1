@@ -79,11 +79,11 @@ class CustomUNet(nn.Module):
 
     def _initialize_weights(self):
         """
-        HeLU2d의 분산 보존 특성에 맞춰 모든 Conv 레이어를 Kaming He Initialization 방식으로 초기화합니다.
+        HeLU2d의 분산 보존 특성에 맞춰 모든 Conv 레이어를 Xavier Initialization 방식으로 초기화합니다.
         """
         for m in self.modules():
             if isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
-                nn.init.kaiming_uniform_(m.weight)
+                nn.init.xavier_uniform_(m.weight)
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
 
