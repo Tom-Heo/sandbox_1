@@ -42,7 +42,7 @@ class CustomUNet(nn.Module):
         self,
         in_channels=3,
         num_classes=3,
-        features=[256, 512, 1024, 2048],
+        features=[128, 256, 512, 1024],
         act_builder=None,
     ):
         super().__init__()
