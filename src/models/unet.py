@@ -42,7 +42,7 @@ class CustomUNet(nn.Module):
         self,
         in_channels=3,
         num_classes=3,
-        features=[64, 128, 256, 512],
+        features=[256, 512, 1024, 2048],
         act_builder=None,
     ):
         super().__init__()
@@ -62,8 +62,22 @@ class CustomUNet(nn.Module):
             in_ch = feature
 
         # [Bottleneck]
-        self.bottleneck = DoubleConv(features[-1], features[-1] * 2, act_builder)
-
+        self.bottleneck1 = DoubleConv(features[-1], features[-1], act_builder)
+        self.bottleneck2 = DoubleConv(features[-1], features[-1], act_builder)
+        self.bottleneck3 = DoubleConv(features[-1], features[-1], act_builder)
+        self.bottleneck4 = DoubleConv(features[-1], features[-1], act_builder)
+        self.bottleneck5 = DoubleConv(features[-1], features[-1], act_builder)
+        self.bottleneck6 = DoubleConv(features[-1], features[-1], act_builder)
+        self.bottleneck7 = DoubleConv(features[-1], features[-1], act_builder)
+        self.bottleneck8 = DoubleConv(features[-1], features[-1], act_builder)
+        self.bottleneck9 = DoubleConv(features[-1], features[-1], act_builder)
+        self.bottleneck10 = DoubleConv(features[-1], features[-1], act_builder)
+        self.bottleneck11 = DoubleConv(features[-1], features[-1], act_builder)
+        self.bottleneck12 = DoubleConv(features[-1], features[-1], act_builder)
+        self.bottleneck13 = DoubleConv(features[-1], features[-1], act_builder)
+        self.bottleneck14 = DoubleConv(features[-1], features[-1], act_builder)
+        self.bottleneck15 = DoubleConv(features[-1], features[-1], act_builder)
+        self.bottleneck16 = DoubleConv(features[-1], features[-1] * 2, act_builder)
         # [Decoder]
         for feature in reversed(features):
             self.ups.append(
@@ -97,7 +111,23 @@ class CustomUNet(nn.Module):
             x = self.pool(x)
 
         # Bottleneck
-        x = self.bottleneck(x)
+        x = self.bottleneck1(x)
+        x = self.bottleneck2(x)
+        x = self.bottleneck3(x)
+        x = self.bottleneck4(x)
+        x = self.bottleneck5(x)
+        x = self.bottleneck6(x)
+        x = self.bottleneck7(x)
+        x = self.bottleneck8(x)
+        x = self.bottleneck9(x)
+        x = self.bottleneck10(x)
+        x = self.bottleneck11(x)
+        x = self.bottleneck12(x)
+        x = self.bottleneck13(x)
+        x = self.bottleneck14(x)
+        x = self.bottleneck15(x)
+        x = self.bottleneck16(x)
+
         skip_connections = skip_connections[::-1]
 
         # Up
